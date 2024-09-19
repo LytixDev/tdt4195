@@ -7,6 +7,8 @@
 #![allow(unused_unsafe)]
 #![allow(unused_variables)]
 */
+
+
 extern crate nalgebra_glm as glm;
 use std::{ mem, ptr, os::raw::c_void };
 use std::thread;
@@ -14,9 +16,12 @@ use std::sync::{Mutex, Arc, RwLock};
 
 mod shader;
 mod util;
+mod camera;
 
 use glutin::event::{Event, WindowEvent, DeviceEvent, KeyboardInput, ElementState::{Pressed, Released}, VirtualKeyCode::{self, *}};
 use glutin::event_loop::ControlFlow;
+
+use std::f32::consts::PI;
 
 // initial window size
 const INITIAL_SCREEN_W: u32 = 800;
@@ -54,22 +59,69 @@ fn offset<T>(n: u32) -> *const c_void {
 
 // == // Generate your VAO here
 unsafe fn create_vao(vertices: &Vec<f32>, indices: &Vec<u32>) -> u32 {
-    // Implement me!
+    // Generate and bind a VAO
+    let mut array = 0;
+    gl::GenVertexArrays(1, &mut array);
+    gl::BindVertexArray(array);
 
-    // Also, feel free to delete comments :)
+    // Generate and bind a VBO
+    let mut buffer = 0;
+    gl::GenBuffers(1, &mut buffer);
+    gl::BindBuffer(gl::ARRAY_BUFFER, buffer);
+    // Fill the VBO with data
+    gl::BufferData(gl::ARRAY_BUFFER, byte_size_of_array(vertices), pointer_to_array(vertices), gl::STATIC_DRAW);
 
-    // This should:
-    // * Generate a VAO and bind it
-    // * Generate a VBO and bind it
-    // * Fill it with data
-    // * Configure a VAP for the data and enable it
-    // * Generate a IBO and bind it
-    // * Fill it with data
-    // * Return the ID of the VAO
+    // Configure a VAP for the data and enable it
+    gl::VertexAttribPointer(0, 3, gl::FLOAT, gl::FALSE, 3 * size_of::<f32>(), ptr::null());
+    gl::EnableVertexAttribArray(0);
 
-    0
+    // Generate a IBO and bind it
+    let mut ibo = 0;
+    gl::GenBuffers(1, &mut ibo);
+    gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, ibo);
+    // Fill the IBO with the indices
+    gl::BufferData(gl::ELEMENT_ARRAY_BUFFER, byte_size_of_array(indices), pointer_to_array(indices), gl::STATIC_DRAW);
+    
+    return array;
 }
 
+unsafe fn create_vao_rgba(vertices: &Vec<f32>, indices: &Vec<u32>, colors: &Vec<f32>) -> u32 {
+    // Generate and bind a VAO
+    let mut array = 0;
+    gl::GenVertexArrays(1, &mut array);
+    gl::BindVertexArray(array);
+
+    // Generate and bind a VBO
+    let mut buffer = 0;
+    gl::GenBuffers(1, &mut buffer);
+    gl::BindBuffer(gl::ARRAY_BUFFER, buffer);
+    // Fill the VBO with data
+    gl::BufferData(gl::ARRAY_BUFFER, byte_size_of_array(vertices), pointer_to_array(vertices), gl::STATIC_DRAW);
+
+    // Configure a VAP for the data and enable it
+    gl::VertexAttribPointer(0, 3, gl::FLOAT, gl::FALSE, 3 * size_of::<f32>(), ptr::null());
+    gl::EnableVertexAttribArray(0);
+
+    // Generate and bind a VBO for the colors
+    let mut color_buffer = 0;
+    gl::GenBuffers(1, &mut color_buffer);
+    gl::BindBuffer(gl::ARRAY_BUFFER, color_buffer);
+    gl::BufferData(gl::ARRAY_BUFFER, byte_size_of_array(colors), pointer_to_array(colors), gl::STATIC_DRAW);
+
+    // Configure a VAP for the colors and enable it
+    gl::VertexAttribPointer(1, 4, gl::FLOAT, gl::FALSE, 4 * size_of::<f32>(), ptr::null());
+    gl::EnableVertexAttribArray(1);
+
+
+    // Generate a IBO and bind it
+    let mut ibo = 0;
+    gl::GenBuffers(1, &mut ibo);
+    gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, ibo);
+    // Fill the IBO with the indices
+    gl::BufferData(gl::ELEMENT_ARRAY_BUFFER, byte_size_of_array(indices), pointer_to_array(indices), gl::STATIC_DRAW);
+    
+    return array;
+}
 
 fn main() {
     // Set up the necessary objects to deal with windows and event handling
@@ -99,6 +151,9 @@ fn main() {
     let arc_window_size = Arc::new(Mutex::new((INITIAL_SCREEN_W, INITIAL_SCREEN_H, false)));
     // Make a reference of this tuple to send to the render thread
     let window_size = Arc::clone(&arc_window_size);
+
+    // Struct to hold camera data
+    let mut camera = camera::Camera::new();
 
     // Spawn a separate thread for rendering, so event handling doesn't block rendering
     let render_thread = thread::spawn(move || {
@@ -132,30 +187,52 @@ fn main() {
 
         // == // Set up your VAO around here
 
-        let my_vao = unsafe { 1337 };
+        // x, y, z
+        let vertices = vec![
+            0.0,  -0.1,  0.75,
+            0.5,  -0.1,  0.75,
+            0.25,  0.5, 0.75,
+
+            0.0 - 0.1,  0.0,  0.5,
+            0.5 - 0.1,  0.0,  0.5,
+            0.25 - 0.1,  0.5, 0.5,
+
+            0.0 - 0.2,  0.2,  0.25,
+            0.75 - 0.2,  0.2,  0.25,
+            (0.75 / 2.0) - 0.1,  1.0, 0.25,
+        ];
+
+        let indices = vec![
+            0, 1, 2,
+            3, 4, 5,
+            6, 7, 8,
+        ];
+        let colors = vec![
+            0.0, 1.0, 0.0, 0.5,
+            0.0, 1.0, 0.0, 0.5,
+            0.0, 1.0, 0.0, 0.5,
+
+            0.0, 0.0, 1.0, 0.5,
+            0.0, 0.0, 1.0, 0.5,
+            0.0, 0.0, 1.0, 0.5,
+
+            1.0, 0.0, 0.0, 0.5,
+            1.0, 0.0, 0.0, 0.5,
+            1.0, 0.0, 0.0, 0.5,
+        ];
+
+        
+
+        let my_vao = unsafe { create_vao_rgba(&vertices, &indices, &colors) };
 
 
         // == // Set up your shaders here
-
-        // Basic usage of shader helper:
-        // The example code below creates a 'shader' object.
-        // It which contains the field `.program_id` and the method `.activate()`.
-        // The `.` in the path is relative to `Cargo.toml`.
-        // This snippet is not enough to do the exercise, and will need to be modified (outside
-        // of just using the correct path), but it only needs to be called once
-
-        /*
-        let simple_shader = unsafe {
+        let shader = unsafe { 
             shader::ShaderBuilder::new()
-                .attach_file("./path/to/simple/shader.file")
+                .attach_file("./shaders/combination.vert")
+                .attach_file("./shaders/blend.frag")
                 .link()
         };
-        */
-
-
-        // Used to demonstrate keyboard handling for exercise 2.
-        let mut _arbitrary_number = 0.0; // feel free to remove
-
 
         // The main rendering loop
         let first_frame_time = std::time::Instant::now();
@@ -185,13 +262,38 @@ fn main() {
                         // The `VirtualKeyCode` enum is defined here:
                         //    https://docs.rs/winit/0.25.0/winit/event/enum.VirtualKeyCode.html
 
+                         VirtualKeyCode::W => {
+                             camera.move_forward(-delta_time);
+                         }
+                        VirtualKeyCode::S => {
+                            camera.move_forward(delta_time);
+                        }
                         VirtualKeyCode::A => {
-                            _arbitrary_number += delta_time;
+                            camera.move_side(-delta_time);
                         }
                         VirtualKeyCode::D => {
-                            _arbitrary_number -= delta_time;
+                            camera.move_side(delta_time);
+                        }
+                        
+                        VirtualKeyCode::Space => {
+                            camera.move_up(delta_time);
+                        }
+                        VirtualKeyCode::LShift => {
+                            camera.move_up(-delta_time);
                         }
 
+                        VirtualKeyCode::Left => {
+                            camera.rotate_right(delta_time);
+                        }
+                        VirtualKeyCode::Right => {
+                            camera.rotate_right(-delta_time);
+                        }
+                        VirtualKeyCode::Up => {
+                            camera.rotate_up(delta_time);
+                        }
+                        VirtualKeyCode::Down => {
+                            camera.rotate_up(-delta_time);
+                        }
 
                         // default handler:
                         _ => { }
@@ -210,6 +312,30 @@ fn main() {
             // == // Please compute camera transforms here (exercise 2 & 3)
 
 
+            let perspective_projection: glm::Mat4 =
+                glm::perspective(
+                window_aspect_ratio,
+                80.0, // Field of View
+                1.0, // Near plane
+                100.0 // Far plane
+            );
+
+            let projection: glm::Mat4 = camera.to_projection(perspective_projection);
+
+            // Translate the triangles into the negative z range.
+            //let translate: glm::Mat4 = glm::translation(&glm::vec3(0.0, 0.0, -2.0));
+            //let final_matrix = perspective_projection * translate;
+
+            unsafe {
+                // Shaders must be activated before changing the values of uniforms
+                shader.activate();
+                // Query for the projection uniform location
+                let projection_uniform_location = shader.get_uniform_location("projection");
+                // Assert that the uniform exists. Should probably be handled more robustly in a real program.
+                assert_ne!(projection_uniform_location, -1);
+                gl::UniformMatrix4fv(projection_uniform_location, 1, gl::FALSE, projection.as_ptr());
+            }
+
             unsafe {
                 // Clear the color and depth buffers
                 gl::ClearColor(0.035, 0.046, 0.078, 1.0); // night sky
@@ -217,9 +343,10 @@ fn main() {
 
 
                 // == // Issue the necessary gl:: commands to draw your scene here
+                shader.activate();
+                gl::BindVertexArray(my_vao);
 
-
-
+                gl::DrawElements(gl::TRIANGLES, indices.len() as i32, gl::UNSIGNED_INT, ptr::null());
             }
 
             // Display the new color buffer on the display
