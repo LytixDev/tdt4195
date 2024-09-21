@@ -16,10 +16,11 @@ use std::sync::{Mutex, Arc, RwLock};
 
 mod shader;
 mod util;
-mod camera;
+mod obj_parser;
 
 use glutin::event::{Event, WindowEvent, DeviceEvent, KeyboardInput, ElementState::{Pressed, Released}, VirtualKeyCode::{self, *}};
 use glutin::event_loop::ControlFlow;
+use rand::Rng;
 
 use std::f32::consts::PI;
 
@@ -153,7 +154,7 @@ fn main() {
     let window_size = Arc::clone(&arc_window_size);
 
     // Struct to hold camera data
-    let mut camera = camera::Camera::new();
+    // let mut camera = camera::Camera::new();
 
     // Spawn a separate thread for rendering, so event handling doesn't block rendering
     let render_thread = thread::spawn(move || {
@@ -185,42 +186,41 @@ fn main() {
             println!("GLSL\t: {}", util::get_gl_string(gl::SHADING_LANGUAGE_VERSION));
         }
 
-        // == // Set up your VAO around here
+        // TODO: unwrap into vertices and indices? Handle error?
+        let (vertices, indices) = match obj_parser::load_obj("./resources/penger.obj") {
+            Ok((v, i)) => (v, i),
+            Err(e) => {
+                println!("Error loading obj file: {}.", e);
+                println!("Giving default values");
+                let vertices = vec![
+                    1.0, 0.0, 0.0,
+                    0.0, 1.0, 0.0,
+                    0.0, 0.0, 1.0,
+                    0.0, 0.0, 0.0,
+                ];
+                let indices = vec![
+                    1, 3, 2,
+                    3, 1, 0,
+                    2, 0, 1,
+                    0, 2, 3,
+                ];
+                return (vertices, indices);
+            }
+        };
 
-        // x, y, z
-        let vertices = vec![
-            0.0,  -0.1,  0.75,
-            0.5,  -0.1,  0.75,
-            0.25,  0.5, 0.75,
-
-            0.0 - 0.1,  0.0,  0.5,
-            0.5 - 0.1,  0.0,  0.5,
-            0.25 - 0.1,  0.5, 0.5,
-
-            0.0 - 0.2,  0.2,  0.25,
-            0.75 - 0.2,  0.2,  0.25,
-            (0.75 / 2.0) - 0.1,  1.0, 0.25,
-        ];
-
-        let indices = vec![
-            0, 1, 2,
-            3, 4, 5,
-            6, 7, 8,
-        ];
-        let colors = vec![
-            0.0, 1.0, 0.0, 0.5,
-            0.0, 1.0, 0.0, 0.5,
-            0.0, 1.0, 0.0, 0.5,
-
-            0.0, 0.0, 1.0, 0.5,
-            0.0, 0.0, 1.0, 0.5,
-            0.0, 0.0, 1.0, 0.5,
-
-            1.0, 0.0, 0.0, 0.5,
-            1.0, 0.0, 0.0, 0.5,
-            1.0, 0.0, 0.0, 0.5,
-        ];
-
+        
+        // Random colors
+        let mut rng = rand::thread_rng();
+        let colors: Vec<f32> = (0..vertices.len() - 1)
+            .map(|_| {
+            let mut color = [0.0, 0.0, 0.0, 1.0];
+            color[0] = rng.gen_range(0.0..1.0);
+            color[1] = rng.gen_range(0.0..1.0);
+            color[2] = rng.gen_range(0.0..1.0);
+            color
+            })
+            .flatten()
+            .collect();
         
 
         let my_vao = unsafe { create_vao_rgba(&vertices, &indices, &colors) };
@@ -237,6 +237,15 @@ fn main() {
         // The main rendering loop
         let first_frame_time = std::time::Instant::now();
         let mut previous_frame_time = first_frame_time;
+        
+        // Camera variables
+        let speed = 3.0_f32;
+        let mut x = 0.0_f32;
+        let mut y = 0.0_f32;
+        let mut z = 0.0_f32;
+        let mut x_rot = 0.0_f32;
+        let mut y_rot = 0.0_f32;
+
         loop {
             // Compute time passed since the previous frame and since the start of the program
             let now = std::time::Instant::now();
@@ -262,37 +271,37 @@ fn main() {
                         // The `VirtualKeyCode` enum is defined here:
                         //    https://docs.rs/winit/0.25.0/winit/event/enum.VirtualKeyCode.html
 
-                         VirtualKeyCode::W => {
-                             camera.move_forward(-delta_time);
-                         }
+                        VirtualKeyCode::W => {
+                            y -= speed * delta_time;
+                        }
                         VirtualKeyCode::S => {
-                            camera.move_forward(delta_time);
+                            y += speed * delta_time;
                         }
                         VirtualKeyCode::A => {
-                            camera.move_side(-delta_time);
+                            x += speed * delta_time;
                         }
                         VirtualKeyCode::D => {
-                            camera.move_side(delta_time);
+                            x -= speed * delta_time;
                         }
                         
                         VirtualKeyCode::Space => {
-                            camera.move_up(delta_time);
+                            z += speed * delta_time;
                         }
                         VirtualKeyCode::LShift => {
-                            camera.move_up(-delta_time);
+                            z -= speed * delta_time;
                         }
 
                         VirtualKeyCode::Left => {
-                            camera.rotate_right(delta_time);
+                            y_rot -= speed * delta_time;
                         }
                         VirtualKeyCode::Right => {
-                            camera.rotate_right(-delta_time);
+                            y_rot += speed * delta_time;
                         }
                         VirtualKeyCode::Up => {
-                            camera.rotate_up(delta_time);
+                            x_rot -= speed * delta_time;
                         }
                         VirtualKeyCode::Down => {
-                            camera.rotate_up(-delta_time);
+                            x_rot += speed * delta_time;
                         }
 
                         // default handler:
@@ -309,22 +318,25 @@ fn main() {
                 *delta = (0.0, 0.0); // reset when done
             }
 
-            // == // Please compute camera transforms here (exercise 2 & 3)
-
 
             let perspective_projection: glm::Mat4 =
                 glm::perspective(
                 window_aspect_ratio,
-                80.0, // Field of View
+                1.0, // Field of View
                 1.0, // Near plane
                 100.0 // Far plane
             );
 
-            let projection: glm::Mat4 = camera.to_projection(perspective_projection);
+            let identity: glm::Mat4= glm::identity();
+            let flip: glm::Mat4 = glm::translation(&glm::vec3(0.0, 0.0, -2.0));
+            let translation: glm::Mat4 = glm::translation(&glm::vec3(x, y, z));
+            let rotation: glm::Mat4 = glm::rotation(x_rot, &glm::vec3(1.0, 0.0, 0.0)) 
+                                    * glm::rotation(y_rot, &glm::vec3(0.0, 1.0, 0.0));
 
-            // Translate the triangles into the negative z range.
-            //let translate: glm::Mat4 = glm::translation(&glm::vec3(0.0, 0.0, -2.0));
-            //let final_matrix = perspective_projection * translate;
+
+            let object_rotation: glm::Mat4 = glm::rotation(elapsed, &glm::vec3(0.0, 1.0, 0.0));
+            let final_matrix: glm::Mat4 = perspective_projection * flip * translation * rotation * object_rotation * identity;
+
 
             unsafe {
                 // Shaders must be activated before changing the values of uniforms
@@ -333,7 +345,7 @@ fn main() {
                 let projection_uniform_location = shader.get_uniform_location("projection");
                 // Assert that the uniform exists. Should probably be handled more robustly in a real program.
                 assert_ne!(projection_uniform_location, -1);
-                gl::UniformMatrix4fv(projection_uniform_location, 1, gl::FALSE, projection.as_ptr());
+                gl::UniformMatrix4fv(projection_uniform_location, 1, gl::FALSE, final_matrix.as_ptr());
             }
 
             unsafe {
